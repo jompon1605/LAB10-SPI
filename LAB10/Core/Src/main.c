@@ -47,8 +47,8 @@ DMA_HandleTypeDef hdma_adc1;
 
 SPI_HandleTypeDef hspi3;
 
+TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
-TIM_HandleTypeDef htim11;
 
 UART_HandleTypeDef huart2;
 
@@ -56,12 +56,16 @@ UART_HandleTypeDef huart2;
 
 char RxDataBuffer[32] = { 0 };
 int state = 0;
-uint16_t Frequency = 0;
-uint16_t High = 3.3; //max 3.3 V
-uint16_t Low = 0; //min 0 V
+double Frequency = 1.0;
+double High = 3.3; //max 3.3 V
+double Low = 0.0; //min 0 V
 int DutyCycle = 100;
 int Slope = 0;
 int WaveForm = 0;
+double WaveGenOut = 0.0;
+double Theta = 0;
+int check = 0;
+int check2 = 0;
 
 char Word1[] = {" Choose Wave Form\r\n SawTooth Wave : Press a\r\n Sine Wave : Press b\r\n Square : Press c \r\n"};
 char Word2[] = {" SawTooth Wave Menu\r\n Set Frequency : Press f\r\n Set Highest Voltage : Press h\r\n Set Lowest Voltage : Press l\r\n Set Slope : Press s\r\n Back : Press x\r\n"};
@@ -74,11 +78,12 @@ char Word8[] = {" Set Slope Menu\r\n Slope Up : Press 1\r\n Slope Down : Press 2
 char Word9[] = {" Set Duty Cycle\r\n Increase Duty Cycle For 5% : Press +\r\n Decrease Duty Cycle For 5% : Press -\r\n Back : Press x\r\n"};
 char Word11[] = {" Slope Up | Increasing Slope\r\n"};
 char Word12[] = {" Slope Down | Decreasing Slope\r\n"};
-char Word13[] = {" Back"};
+char Word13[] = {" Back\r\n"};
+char WordError[] = {"Error : Highest Voltage Can't Less Than Lowest Voltage\r\n"};
 
 char ShowFrequency[32] = {0}; //Frequency
 char ShowDutyCycle[32] = {0}; //Duty cycle
-char ShowVoltage[50] = {0}; //High | Low
+char ShowVoltage[64] = {0}; //High | Low
 
 
 
@@ -96,7 +101,7 @@ static void MX_USART2_UART_Init(void);
 static void MX_SPI3_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_TIM3_Init(void);
-static void MX_TIM11_Init(void);
+static void MX_TIM2_Init(void);
 /* USER CODE BEGIN PFP */
 
 int16_t UARTRecieveIT();
@@ -143,11 +148,11 @@ int main(void)
   MX_SPI3_Init();
   MX_ADC1_Init();
   MX_TIM3_Init();
-  MX_TIM11_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
 
 	HAL_TIM_Base_Start(&htim3);
-	HAL_TIM_Base_Start_IT(&htim11);
+	HAL_TIM_Base_Start_IT(&htim2);
 	HAL_ADC_Start_DMA(&hadc1, (uint32_t*) &ADCin, 1);
 
 	HAL_GPIO_WritePin(LOAD_GPIO_Port, LOAD_Pin, GPIO_PIN_RESET);
@@ -192,6 +197,7 @@ int main(void)
 					WaveForm = 3;
 					break;
 				}
+				break;
 			}
 			case 2: //sawtooth wave menu
 			{
@@ -225,6 +231,7 @@ int main(void)
 					HAL_UART_Transmit(&huart2, (uint8_t*)Word13, strlen(Word13), 1000);
 					break;
 				}
+				break;
 			}
 			case 3: //sine wave menu
 			{
@@ -252,6 +259,7 @@ int main(void)
 					HAL_UART_Transmit(&huart2, (uint8_t*)Word13, strlen(Word13), 1000);
 					break;
 				}
+				break;
 			}
 			case 4: //square wave menu
 			{
@@ -285,13 +293,18 @@ int main(void)
 					HAL_UART_Transmit(&huart2, (uint8_t*)Word13, strlen(Word13), 1000);
 					break;
 				}
+				break;
 			}
 			case 5: //frequency menu
 			{
 				if(inputchar == '+')
 				{
 					Frequency += 0.1;
-					sprintf(ShowFrequency, "Current Frequency : %d Hz\r\n", Frequency);
+					if(Frequency > 10)
+					{
+						Frequency = 10;
+					}
+					sprintf(ShowFrequency, "Current Frequency : %f Hz\r\n", Frequency);
 					HAL_UART_Transmit(&huart2, (uint8_t*)ShowFrequency, strlen(ShowFrequency), 1000);
 					break;
 				}
@@ -302,7 +315,7 @@ int main(void)
 					{
 						Frequency = 0;
 					}
-					sprintf(ShowFrequency, "Current Frequency : %d Hz\r\n", Frequency);
+					sprintf(ShowFrequency, "Current Frequency : %f Hz\r\n", Frequency);
 					HAL_UART_Transmit(&huart2, (uint8_t*)ShowFrequency, strlen(ShowFrequency), 1000);
 					break;
 				}
@@ -328,6 +341,7 @@ int main(void)
 					}
 					break;
 				}
+				break;
 			}
 			case 6: //high menu
 			{
@@ -338,7 +352,7 @@ int main(void)
 					{
 						High = 3.3;
 					}
-					sprintf(ShowVoltage, " High Voltage : %d V | Low Voltage : %d V  \r\n" , High , Low);
+					sprintf(ShowVoltage, " High Voltage : %f V | Low Voltage : %f V  \r\n" , High , Low);
 					HAL_UART_Transmit(&huart2, (uint8_t*)ShowVoltage, strlen(ShowVoltage), 1000);
 					break;
 				}
@@ -349,7 +363,12 @@ int main(void)
 					{
 						High = 0;
 					}
-					sprintf(ShowVoltage, " High Voltage : %d V | Low Voltage : %d V \r\n" , High , Low);
+					if(High < Low)
+					{
+						High += 0.1;
+						HAL_UART_Transmit(&huart2, (uint8_t*)WordError, strlen(WordError), 1000);
+					}
+					sprintf(ShowVoltage, " High Voltage : %f V | Low Voltage : %f V \r\n" , High , Low);
 					HAL_UART_Transmit(&huart2, (uint8_t*)ShowVoltage, strlen(ShowVoltage), 1000);
 					break;
 				}
@@ -375,17 +394,19 @@ int main(void)
 					}
 					break;
 				}
+				break;
 			}
 			case 7: //low menu
 			{
 				if(inputchar == '+')
 				{
 					Low += 0.1;
-					if(Low > 3.3)
+					if(Low > High + 0.1)
 					{
-						Low = 3.3;
+						Low -= 0.1;
+						HAL_UART_Transmit(&huart2, (uint8_t*)WordError, strlen(WordError), 1000);
 					}
-					sprintf(ShowVoltage, " High Voltage : %d V | Low Voltage : %d V \r\n" , High , Low);
+					sprintf(ShowVoltage, " High Voltage : %f V | Low Voltage : %f V \r\n" , High , Low);
 					HAL_UART_Transmit(&huart2, (uint8_t*)ShowVoltage, strlen(ShowVoltage), 1000);
 					break;
 				}
@@ -396,7 +417,7 @@ int main(void)
 					{
 						Low = 0;
 					}
-					sprintf(ShowVoltage, " High Voltage : %d V | Low Voltage : %d V \r\n" , High , Low);
+					sprintf(ShowVoltage, " High Voltage : %f V | Low Voltage : %f V \r\n" , High , Low);
 					HAL_UART_Transmit(&huart2, (uint8_t*)ShowVoltage, strlen(ShowVoltage), 1000);
 					break;
 				}
@@ -422,6 +443,7 @@ int main(void)
 					}
 					break;
 				}
+				break;
 			}
 			case 8: //slope menu
 			{
@@ -444,6 +466,7 @@ int main(void)
 					HAL_UART_Transmit(&huart2, (uint8_t*)Word2, strlen(Word2), 1000);
 					break;
 				}
+				break;
 			}
 			case 9: //duty cycle menu
 			{
@@ -454,7 +477,7 @@ int main(void)
 					{
 						DutyCycle = 100;
 					}
-					sprintf(ShowDutyCycle, "Duty Cycle : %d %\r\n", DutyCycle);
+					sprintf(ShowDutyCycle, "Duty Cycle : %d \r\n", DutyCycle);
 					HAL_UART_Transmit(&huart2, (uint8_t*)ShowDutyCycle, strlen(ShowDutyCycle), 1000);
 					break;
 				}
@@ -465,7 +488,7 @@ int main(void)
 					{
 						DutyCycle = 0;
 					}
-					sprintf(ShowDutyCycle, "Duty Cycle : %d %\r\n", DutyCycle);
+					sprintf(ShowDutyCycle, "Duty Cycle : %d \r\n", DutyCycle);
 					HAL_UART_Transmit(&huart2, (uint8_t*)ShowDutyCycle, strlen(ShowDutyCycle), 1000);
 					break;
 				}
@@ -476,44 +499,75 @@ int main(void)
 					HAL_UART_Transmit(&huart2, (uint8_t*)Word4, strlen(Word4), 1000);
 					break;
 				}
+				break;
 			}
-//			if (micros() - timestamp > 100)
-//			{
-//				if(WaveForm = 1)
-//				{
-//					if(Slope = 1)
-//					{
-//
-//					}
-//					else if(Slope = 2)
-//					{
-//
-//					}
-//				}
-//				timestamp = micros();
-//				if (hspi3.State == HAL_SPI_STATE_READY && HAL_GPIO_ReadPin(SPI_SS_GPIO_Port, SPI_SS_Pin) == GPIO_PIN_SET)
-//				{
-//					MCP4922SetOutput(DACConfig, dataOut);
-//				}
-//			}
+		}
+		static uint64_t timestamp = 0;
+		static uint64_t timestampGenWave = 0;
 
+
+		if (micros() - timestamp > 100) //period 100uS -> frequency 10000 Hz # period(uS) don't forget to multi 10^6
+		{
+			if(WaveForm == 1) //sawtooth wave
+			{
+				if(Slope == 1) //Slope Up //from the beginning plus middle value that multiply time and divine period
+				{
+					if(micros() - timestampGenWave <= (1000000/Frequency))
+					{
+						WaveGenOut = Low + (High - Low)*(micros() - timestampGenWave)*Frequency/1000000;
+					}
+					else if(micros() - timestampGenWave > (1000000/Frequency))
+					{
+						timestampGenWave = micros();
+					}
+				}
+				else if(Slope == 2) //Slope Down
+				{
+					if(micros() - timestampGenWave <= 1000000/Frequency)
+					{
+						WaveGenOut = High - (High - Low)*(micros() - timestampGenWave)*Frequency/1000000;
+					}
+					else if(micros() - timestampGenWave > 1000000/Frequency)
+					{
+						timestampGenWave = micros();
+					}
+				}
+			}
+			else if(WaveForm == 2) //sine wave // find theta that depend on time and frequency | give starter value and plus A*sin(theta)
+			{
+				if(micros() - timestampGenWave <= 1000000/Frequency)
+				{
+					Theta = -90 + 2*3.14*(micros() - timestampGenWave)*Frequency/1000000;
+					WaveGenOut = ((High - Low)/2 + Low) + ((High - Low)/2)*sin(Theta);
+				}
+				else
+				{
+					timestampGenWave = micros();
+				}
+			}
+			else if(WaveForm == 3) //square wave // in dutycycle = high | out of duty cycle = low
+			{
+				if(micros() - timestampGenWave > (1000000/Frequency))
+				{
+					timestampGenWave = micros();
+				}
+				else if(micros() - timestampGenWave <= (1000000/Frequency)*DutyCycle/100)
+				{
+					WaveGenOut = High;
+				}
+				else if(micros() - timestampGenWave > (1000000/Frequency)*DutyCycle/100)
+				{
+					WaveGenOut = Low;
+				}
+			}
+			dataOut = ((WaveGenOut/3.3)*4096); //WaveGenOut Value is a Voltage value #devine by 3.3 and multiply 4096 to change to range of IC
+			timestamp = micros();
+			if (hspi3.State == HAL_SPI_STATE_READY && HAL_GPIO_ReadPin(SPI_SS_GPIO_Port, SPI_SS_Pin) == GPIO_PIN_SET)
+			{
+				MCP4922SetOutput(DACConfig, dataOut);
+			}
 		}
 
-
-
-//		static uint64_t timestamp = 0;
-//		if (micros() - timestamp > 100)
-//		{
-//			timestamp = micros();
-//			dataOut++;
-//			dataOut %= 4096;
-//			if (hspi3.State == HAL_SPI_STATE_READY
-//					&& HAL_GPIO_ReadPin(SPI_SS_GPIO_Port, SPI_SS_Pin)
-//							== GPIO_PIN_SET)
-//			{
-//				MCP4922SetOutput(DACConfig, dataOut);
-//			}
-//		}
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -654,6 +708,51 @@ static void MX_SPI3_Init(void)
 }
 
 /**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 99;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 4294967295;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
+
+}
+
+/**
   * @brief TIM3 Initialization Function
   * @param None
   * @retval None
@@ -672,7 +771,7 @@ static void MX_TIM3_Init(void)
 
   /* USER CODE END TIM3_Init 1 */
   htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 100;
+  htim3.Init.Prescaler = 99;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim3.Init.Period = 100;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -695,37 +794,6 @@ static void MX_TIM3_Init(void)
   /* USER CODE BEGIN TIM3_Init 2 */
 
   /* USER CODE END TIM3_Init 2 */
-
-}
-
-/**
-  * @brief TIM11 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_TIM11_Init(void)
-{
-
-  /* USER CODE BEGIN TIM11_Init 0 */
-
-  /* USER CODE END TIM11_Init 0 */
-
-  /* USER CODE BEGIN TIM11_Init 1 */
-
-  /* USER CODE END TIM11_Init 1 */
-  htim11.Instance = TIM11;
-  htim11.Init.Prescaler = 100;
-  htim11.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim11.Init.Period = 65535;
-  htim11.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim11.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  if (HAL_TIM_Base_Init(&htim11) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN TIM11_Init 2 */
-
-  /* USER CODE END TIM11_Init 2 */
 
 }
 
@@ -849,9 +917,9 @@ void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi)
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
-	if (htim == &htim11)
+	if (htim == &htim2)
 	{
-		_micro += 65535;
+		_micro += 4294967295;
 	}
 }
 
@@ -869,7 +937,7 @@ int16_t UARTRecieveIT()
 
 inline uint64_t micros()
 {
-	return htim11.Instance->CNT + _micro;
+	return htim2.Instance->CNT + _micro;
 }
 /* USER CODE END 4 */
 
